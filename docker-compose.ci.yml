@@ -1,0 +1,287 @@
+version: '3.8'
+
+services:
+  # CI/CD Database
+  ci-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ci_test_db
+      POSTGRES_USER: ci_user
+      POSTGRES_PASSWORD: ci_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5433:5432"
+    volumes:
+      - ci_postgres_data:/var/lib/postgresql/data
+      - ./infra/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ci_user -d ci_test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ci_network
+
+  # CI/CD Redis
+  ci-redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - ci_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ci_network
+
+  # CI/CD MLflow
+  ci-mlflow:
+    image: python:3.11-slim
+    working_dir: /app
+    environment:
+      - MLFLOW_TRACKING_URI=http://localhost:5000
+      - MLFLOW_S3_ENDPOINT_URL=http://localhost:9000
+    volumes:
+      - ./ml:/app
+      - ci_mlflow_data:/mlflow
+    ports:
+      - "5001:5000"
+    command: >
+      bash -c "
+        pip install mlflow boto3 &&
+        mlflow server
+          --host 0.0.0.0
+          --port 5000
+          --backend-store-uri sqlite:///mlflow.db
+          --default-artifact-root ./mlflow
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ci_network
+
+  # CI/CD API Service
+  ci-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      - ENVIRONMENT=ci
+      - DATABASE_URL=postgresql://ci_user:ci_password@ci-db:5432/ci_test_db
+      - REDIS_URL=redis://ci-redis:6379
+      - MLFLOW_TRACKING_URI=http://ci-mlflow:5000
+      - TESTING=true
+      - LOG_LEVEL=DEBUG
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./app:/app/app
+      - ./ml:/app/ml
+      - ./models:/app/models
+      - ./data:/app/data
+    depends_on:
+      ci-db:
+        condition: service_healthy
+      ci-redis:
+        condition: service_healthy
+      ci-mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ci_network
+    command: >
+      uvicorn app.main:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+        --log-level debug
+
+  # CI/CD Frontend
+  ci-frontend:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile.ci
+    environment:
+      - REACT_APP_API_URL=http://localhost:8001
+      - REACT_APP_ENVIRONMENT=ci
+      - CI=true
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./ui/src:/app/src
+      - ./ui/public:/app/public
+    depends_on:
+      ci-api:
+        condition: service_healthy
+    networks:
+      - ci_network
+
+  # CI/CD Monitoring
+  ci-monitoring:
+    build:
+      context: ./monitoring
+      dockerfile: Dockerfile.ci
+    environment:
+      - ENVIRONMENT=ci
+      - DATABASE_URL=postgresql://ci_user:ci_password@ci-db:5432/ci_test_db
+      - MLFLOW_TRACKING_URI=http://ci-mlflow:5000
+    volumes:
+      - ./monitoring:/app
+      - ./data:/app/data
+      - ci_monitoring_data:/app/reports
+    depends_on:
+      ci-db:
+        condition: service_healthy
+      ci-mlflow:
+        condition: service_healthy
+    networks:
+      - ci_network
+
+  # CI/CD Test Runner
+  ci-test-runner:
+    image: python:3.11-slim
+    working_dir: /app
+    environment:
+      - ENVIRONMENT=ci
+      - DATABASE_URL=postgresql://ci_user:ci_password@ci-db:5432/ci_test_db
+      - REDIS_URL=redis://ci-redis:6379
+      - TESTING=true
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+    depends_on:
+      ci-db:
+        condition: service_healthy
+      ci-redis:
+        condition: service_healthy
+      ci-api:
+        condition: service_healthy
+    networks:
+      - ci_network
+    command: >
+      bash -c "
+        pip install -r requirements.txt &&
+        pip install pytest pytest-cov pytest-html pytest-xdist pytest-asyncio httpx &&
+        python -m pytest tests/ -v --cov=app --cov=ml --cov-report=html --cov-report=term-missing
+      "
+
+  # CI/CD Load Testing
+  ci-load-tester:
+    image: python:3.11-slim
+    working_dir: /app
+    environment:
+      - ENVIRONMENT=ci
+      - API_URL=http://ci-api:8000
+    volumes:
+      - .:/app
+    depends_on:
+      ci-api:
+        condition: service_healthy
+    networks:
+      - ci_network
+    command: >
+      bash -c "
+        pip install locust &&
+        locust -f tests/load_test.py
+          --host http://ci-api:8000
+          --headless
+          -u 10
+          -r 2
+          --run-time 60s
+          --html load-test-report.html
+      "
+
+  # CI/CD Security Scanner
+  ci-security:
+    image: python:3.11-slim
+    working_dir: /app
+    environment:
+      - ENVIRONMENT=ci
+    volumes:
+      - .:/app
+    networks:
+      - ci_network
+    command: >
+      bash -c "
+        pip install bandit safety &&
+        echo 'Running Bandit security scan...' &&
+        bandit -r app/ ml/ -f json -o bandit-report.json &&
+        echo 'Running Safety security scan...' &&
+        safety check --json --output safety-report.json &&
+        echo 'Security scanning completed'
+      "
+
+  # CI/CD Code Quality
+  ci-code-quality:
+    image: python:3.11-slim
+    working_dir: /app
+    environment:
+      - ENVIRONMENT=ci
+    volumes:
+      - .:/app
+    networks:
+      - ci_network
+    command: >
+      bash -c "
+        pip install flake8 black isort mypy &&
+        echo 'Running Flake8...' &&
+        flake8 app/ ml/ tests/ --max-line-length=100 --extend-ignore=E203,W503 --output-file=flake8-report.txt &&
+        echo 'Running Black...' &&
+        black --check --diff app/ ml/ tests/ > black-report.txt 2>&1 || true &&
+        echo 'Running isort...' &&
+        isort --check-only --diff app/ ml/ tests/ > isort-report.txt 2>&1 || true &&
+        echo 'Running MyPy...' &&
+        mypy app/ ml/ --ignore-missing-imports --output-file=mypy-report.txt || true &&
+        echo 'Code quality checks completed'
+      "
+
+  # CI/CD Documentation Generator
+  ci-docs:
+    image: python:3.11-slim
+    working_dir: /app
+    environment:
+      - ENVIRONMENT=ci
+    volumes:
+      - .:/app
+    depends_on:
+      ci-api:
+        condition: service_healthy
+    networks:
+      - ci_network
+    command: >
+      bash -c "
+        pip install sphinx sphinx-rtd-theme sphinx-autodoc-typehints &&
+        echo 'Generating API documentation...' &&
+        curl -o api-docs.json http://ci-api:8000/openapi.json &&
+        echo 'Building Sphinx documentation...' &&
+        cd docs && make html &&
+        echo 'Documentation generation completed'
+      "
+
+volumes:
+  ci_postgres_data:
+    driver: local
+  ci_redis_data:
+    driver: local
+  ci_mlflow_data:
+    driver: local
+  ci_monitoring_data:
+    driver: local
+
+networks:
+  ci_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

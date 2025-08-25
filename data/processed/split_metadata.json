@@ -1,0 +1,23 @@
+{
+  "split_info": {
+    "train_size": 1200,
+    "val_size": 400,
+    "test_size": 400,
+    "total_size": 2000,
+    "split_timestamp": "2025-08-25T01:19:52.019598"
+  },
+  "target_distribution": {
+    "train": {
+      "false": 929,
+      "true": 271
+    },
+    "val": {
+      "false": 292,
+      "true": 108
+    },
+    "test": {
+      "false": 298,
+      "true": 102
+    }
+  }
+}
