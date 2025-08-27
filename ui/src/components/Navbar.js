@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useAuthStore } from '../stores/authStore';
+import useAuthStore from '../stores/authStore';
 import { Menu, Bell, User } from 'lucide-react';
 
 const Navbar = () => {

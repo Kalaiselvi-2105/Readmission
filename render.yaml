@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: readmission-prototype
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 18
+

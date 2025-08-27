@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { useAuthStore } from '../stores/authStore';
+import useAuthStore from '../stores/authStore';
 import {
   Home,
   Activity,

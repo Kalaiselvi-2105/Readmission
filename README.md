@@ -466,3 +466,28 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Built with ❤️ for better healthcare outcomes**
 
+
+
+## ⚡ Minimal Node.js Express prototype (no Docker)
+
+This repository now includes a tiny Express server for super-quick local runs and one-click deployment on Render.
+
+### Run locally
+
+```bash
+npm install
+npm start
+# Open http://localhost:3000 and http://localhost:3000/api/health
+```
+
+### Deploy on Render (no Docker)
+
+- Push this repo to GitHub
+- On Render: New → Blueprint → point to this repo (uses `render.yaml`)
+- Render will run `npm install` then `npm start`
+
+Files added for this prototype:
+- `package.json` (scripts and dependencies)
+- `server.js` (Express server)
+- `public/index.html` (static homepage)
+- `render.yaml` (Render blueprint)

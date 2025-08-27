@@ -312,3 +312,8 @@ def get_endpoint_cost(endpoint: str) -> int:
     """Get the cost for a specific endpoint."""
     return ENDPOINT_COSTS.get(endpoint, 1)
 
+
+
+
+
+

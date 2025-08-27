@@ -10,7 +10,7 @@ import Explanations from './pages/Explanations';
 import Analytics from './pages/Analytics';
 import Admin from './pages/Admin';
 import Login from './pages/Login';
-import { useAuthStore } from './stores/authStore';
+import useAuthStore from './stores/authStore';
 import './App.css';
 
 function App() {
