@@ -108,6 +108,13 @@ ui/.env.production.local
 ui/build/
 ui/dist/
 
+# Node.js (root prototype)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
 # Docker
 .dockerignore
 
